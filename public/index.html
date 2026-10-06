@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>Claim</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <main class="app">
+
+    <h1>Claim</h1>
+
+    <div class="balance-card">
+      <span>Balance</span>
+      <strong>$<span id="balance">0.0000</span></strong>
+    </div>
+
+    <button id="claimBtn">
+      Claim $0.0001
+    </button>
+
+    <section class="withdraw">
+
+      <h2>Withdraw</h2>
+
+      <input
+        id="wallet"
+        type="text"
+        placeholder="BEP20 address"
+        autocomplete="off"
+      >
+
+      <input
+        id="amount"
+        type="number"
+        step="0.0001"
+        min="0.0001"
+        placeholder="Amount"
+      >
+
+      <button id="withdrawBtn">
+        Withdraw
+      </button>
+
+    </section>
+
+    <p id="status"></p>
+
+  </main>
+
+  <script src="app.js"></script>
+
+</body>
+</html>
