@@ -170,6 +170,30 @@ function initDatabase() {
       ON CONFLICT (key) DO NOTHING
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS referrals (
+        invitee_id BIGINT PRIMARY KEY,
+        inviter_id BIGINT NOT NULL,
+        rewarded BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS withdrawals (
+        id SERIAL PRIMARY KEY,
+        telegram_id BIGINT NOT NULL,
+        method TEXT NOT NULL,
+        account TEXT NOT NULL,
+        holder_name TEXT NOT NULL DEFAULT '',
+        amount_birr INTEGER NOT NULL,
+        coins BIGINT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at TIMESTAMPTZ
+      )
+    `);
+
     console.log('Database initialized.');
 
   })().catch((error) => {
@@ -1089,6 +1113,10 @@ app.post(
 
         await initDatabase();
 
+        await captureReferral(message.from?.id, text)
+
+          .catch((e) => console.error('REFERRAL ERROR:', e));
+
         const userId =
           message.from?.id;
 
@@ -1653,6 +1681,10 @@ app.post(
         !messageAlreadySent
       ) {
 
+        await payReferral(telegramId)
+          .catch((e) => console.error('REFERRAL PAY ERROR:', e));
+
+
         const sent =
           await sendVerificationSuccess(
             user
@@ -1902,7 +1934,10 @@ async function getSettings() {
     coins_per_ad: 20,
     daily_ad_limit: 20,
     ad_cooldown_seconds: 15,
-    min_ad_seconds: 5
+    min_ad_seconds: 5,
+    invite_reward: 500,
+    coins_per_birr: 100,
+    min_withdraw_birr: 50
   };
 
   for (const row of result.rows) {
@@ -2069,7 +2104,8 @@ app.post(
 
       return res.json({
         ok: true,
-        state
+        state,
+        is_admin: ADMIN_IDS.includes(String(telegramId))
       });
 
     } catch (error) {
@@ -2407,6 +2443,443 @@ app.post(
     }
   }
 );
+
+
+// =========================================================
+// INVITE / WALLET / ADMIN PANEL
+// =========================================================
+
+let botUsernameCache = null;
+
+async function getBotUsername() {
+  if (botUsernameCache) return botUsernameCache;
+  const r = await telegram('getMe');
+  botUsernameCache = r.result.username;
+  return botUsernameCache;
+}
+
+// Saves "who invited me" when a NEW user opens /start ref_<inviterId>
+async function captureReferral(inviteeId, text) {
+
+  const m =
+    String(text || '').match(/^\/start\s+ref_(\d+)\s*$/);
+
+  if (!m || !inviteeId) return;
+
+  const inviterId = Number(m[1]);
+
+  if (inviterId === Number(inviteeId)) return;
+
+  const known =
+    await pool.query(
+      'SELECT 1 FROM fraud_users WHERE telegram_id = $1',
+      [inviteeId]
+    );
+
+  if (known.rows.length > 0) return;
+
+  await pool.query(
+    `
+    INSERT INTO referrals (invitee_id, inviter_id)
+    VALUES ($1, $2)
+    ON CONFLICT (invitee_id) DO NOTHING
+    `,
+    [inviteeId, inviterId]
+  );
+}
+
+// Pays the inviter once, when the invited user passes verification
+async function payReferral(inviteeId) {
+
+  const r =
+    await pool.query(
+      `
+      UPDATE referrals
+      SET rewarded = TRUE
+      WHERE invitee_id = $1 AND rewarded = FALSE
+      RETURNING inviter_id
+      `,
+      [inviteeId]
+    );
+
+  if (r.rows.length === 0) return;
+
+  const inviterId = r.rows[0].inviter_id;
+  const settings = await getSettings();
+
+  await pool.query(
+    `
+    INSERT INTO user_balance (telegram_id, coins, invite_coins)
+    VALUES ($1, $2::bigint, $2::bigint)
+    ON CONFLICT (telegram_id) DO UPDATE SET
+      coins = user_balance.coins + $2::bigint,
+      invite_coins = user_balance.invite_coins + $2::bigint
+    `,
+    [inviterId, settings.invite_reward]
+  );
+
+  await sendTelegramMessage(
+    inviterId,
+    `🎉 ጓደኛዎ ተቀላቅሏል! +${settings.invite_reward} ሳንቲም አግኝተዋል።`
+  );
+}
+
+async function requireAdmin(req, res) {
+
+  const id = await requireUser(req, res);
+
+  if (!id) return null;
+
+  if (!ADMIN_IDS.includes(String(id))) {
+
+    res.status(403).json({
+      ok: false,
+      message: 'Not allowed.'
+    });
+
+    return null;
+  }
+
+  return id;
+}
+
+function route(path, handler, admin = false) {
+
+  app.post(path, async (req, res) => {
+
+    try {
+
+      await initDatabase();
+
+      const id =
+        admin
+          ? await requireAdmin(req, res)
+          : await requireUser(req, res);
+
+      if (!id) return;
+
+      await handler(id, req, res);
+
+    } catch (error) {
+
+      console.error(path, error);
+
+      res.status(500).json({
+        ok: false,
+        message: 'Server error.'
+      });
+    }
+  });
+}
+
+// ---------------- INVITE ----------------
+
+route('/api/invite', async (id, req, res) => {
+
+  const bot = await getBotUsername();
+  const settings = await getSettings();
+
+  const r =
+    await pool.query(
+      `
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE rewarded)::int AS done
+      FROM referrals
+      WHERE inviter_id = $1
+      `,
+      [id]
+    );
+
+  res.json({
+    ok: true,
+    link: `https://t.me/${bot}?start=ref_${id}`,
+    total: r.rows[0].total,
+    done: r.rows[0].done,
+    reward: settings.invite_reward
+  });
+});
+
+// ---------------- WALLET ----------------
+
+route('/api/wallet', async (id, req, res) => {
+
+  const settings = await getSettings();
+  const state = await getEarnState(id, settings);
+  const rate = Math.max(1, settings.coins_per_birr);
+
+  const list =
+    await pool.query(
+      `
+      SELECT id, method, account, amount_birr, status
+      FROM withdrawals
+      WHERE telegram_id = $1
+      ORDER BY id DESC
+      LIMIT 10
+      `,
+      [id]
+    );
+
+  res.json({
+    ok: true,
+    coins: state.coins,
+    birr: Math.floor(state.coins / rate),
+    min_birr: settings.min_withdraw_birr,
+    history: list.rows
+  });
+});
+
+route('/api/withdraw', async (id, req, res) => {
+
+  const method = String(req.body?.method || '');
+  const account = String(req.body?.account || '').trim();
+  const name = String(req.body?.name || '').trim().slice(0, 60);
+
+  const rules = {
+    telebirr: /^(09|07)\d{8}$/,
+    cbe: /^\d{13}$/
+  };
+
+  if (!rules[method] || !rules[method].test(account) || name.length < 3) {
+
+    return res.status(400).json({
+      ok: false,
+      message: 'የስልክ/አካውንት ቁጥር ወይም ስም ትክክል አይደለም።'
+    });
+  }
+
+  const settings = await getSettings();
+  const rate = Math.max(1, settings.coins_per_birr);
+
+  const client = await pool.connect();
+
+  try {
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+      INSERT INTO user_balance (telegram_id)
+      VALUES ($1)
+      ON CONFLICT (telegram_id) DO NOTHING
+      `,
+      [id]
+    );
+
+    const bal =
+      await client.query(
+        'SELECT coins FROM user_balance WHERE telegram_id = $1 FOR UPDATE',
+        [id]
+      );
+
+    const pending =
+      await client.query(
+        `
+        SELECT 1 FROM withdrawals
+        WHERE telegram_id = $1 AND status = 'pending'
+        LIMIT 1
+        `,
+        [id]
+      );
+
+    if (pending.rows.length > 0) {
+
+      await client.query('ROLLBACK');
+
+      return res.status(400).json({
+        ok: false,
+        message: 'ያልተጠናቀቀ የማውጫ ጥያቄ አለዎት።'
+      });
+    }
+
+    const birr = Math.floor(Number(bal.rows[0].coins) / rate);
+
+    if (birr < settings.min_withdraw_birr) {
+
+      await client.query('ROLLBACK');
+
+      return res.status(400).json({
+        ok: false,
+        message: `ዝቅተኛው ማውጫ ${settings.min_withdraw_birr} ብር ነው።`
+      });
+    }
+
+    const coins = birr * rate;
+
+    await client.query(
+      'UPDATE user_balance SET coins = coins - $2 WHERE telegram_id = $1',
+      [id, coins]
+    );
+
+    await client.query(
+      `
+      INSERT INTO withdrawals
+        (telegram_id, method, account, holder_name, amount_birr, coins)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [id, method, account, name, birr, coins]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ ok: true });
+
+  } catch (error) {
+
+    await client.query('ROLLBACK').catch(() => {});
+
+    throw error;
+
+  } finally {
+
+    client.release();
+  }
+});
+
+// ---------------- ADMIN ----------------
+
+const EDITABLE_SETTINGS = [
+  'coins_per_ad',
+  'daily_ad_limit',
+  'ad_cooldown_seconds',
+  'invite_reward',
+  'coins_per_birr',
+  'min_withdraw_birr'
+];
+
+route('/api/admin/stats', async (id, req, res) => {
+
+  const u =
+    await pool.query(
+      `
+      SELECT
+        COUNT(*)::int AS users,
+        COUNT(*) FILTER (WHERE status = 'banned')::int AS banned
+      FROM fraud_users
+      `
+    );
+
+  const w =
+    await pool.query(
+      `SELECT COUNT(*)::int AS pending FROM withdrawals WHERE status = 'pending'`
+    );
+
+  const c =
+    await pool.query(
+      'SELECT COALESCE(SUM(coins), 0)::bigint AS coins FROM user_balance'
+    );
+
+  res.json({
+    ok: true,
+    users: u.rows[0].users,
+    banned: u.rows[0].banned,
+    pending: w.rows[0].pending,
+    coins: Number(c.rows[0].coins),
+    settings: await getSettings()
+  });
+}, true);
+
+route('/api/admin/settings', async (id, req, res) => {
+
+  const key = String(req.body?.key || '');
+  const value = Number(req.body?.value);
+
+  if (
+    !EDITABLE_SETTINGS.includes(key) ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    (key === 'coins_per_birr' && value < 1)
+  ) {
+
+    return res.status(400).json({
+      ok: false,
+      message: 'Invalid value.'
+    });
+  }
+
+  await pool.query(
+    `
+    INSERT INTO app_settings (key, value)
+    VALUES ($1, $2)
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `,
+    [key, String(Math.floor(value))]
+  );
+
+  res.json({ ok: true });
+}, true);
+
+route('/api/admin/withdrawals', async (id, req, res) => {
+
+  const r =
+    await pool.query(
+      `
+      SELECT
+        w.id,
+        w.telegram_id,
+        w.method,
+        w.account,
+        w.holder_name,
+        w.amount_birr,
+        f.username
+      FROM withdrawals w
+      LEFT JOIN fraud_users f ON f.telegram_id = w.telegram_id
+      WHERE w.status = 'pending'
+      ORDER BY w.id
+      LIMIT 30
+      `
+    );
+
+  res.json({ ok: true, rows: r.rows });
+}, true);
+
+route('/api/admin/withdrawals/resolve', async (id, req, res) => {
+
+  const wid = Number(req.body?.id);
+  const action = req.body?.action;
+
+  if (!Number.isInteger(wid) || !['paid', 'rejected'].includes(action)) {
+
+    return res.status(400).json({
+      ok: false,
+      message: 'Invalid request.'
+    });
+  }
+
+  const r =
+    await pool.query(
+      `
+      UPDATE withdrawals
+      SET status = $2, resolved_at = NOW()
+      WHERE id = $1 AND status = 'pending'
+      RETURNING telegram_id, coins, amount_birr
+      `,
+      [wid, action]
+    );
+
+  if (r.rows.length === 0) {
+    return res.json({ ok: false, message: 'አልተገኘም።' });
+  }
+
+  const w = r.rows[0];
+
+  if (action === 'rejected') {
+
+    await pool.query(
+      'UPDATE user_balance SET coins = coins + $2 WHERE telegram_id = $1',
+      [w.telegram_id, w.coins]
+    );
+  }
+
+  await sendTelegramMessage(
+    w.telegram_id,
+    action === 'paid'
+      ? `✅ የ${w.amount_birr} ብር ክፍያዎ ተከፍሏል።`
+      : '❌ የማውጫ ጥያቄዎ ውድቅ ሆኗል፤ ሳንቲምዎ ተመልሷል።'
+  );
+
+  res.json({ ok: true });
+}, true);
 
 
 // =========================================================
