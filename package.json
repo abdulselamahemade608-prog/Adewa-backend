@@ -1,11 +1,11 @@
 {
-  "name": "adewa-mini-app",
+  "name": "claim-mini-app",
   "version": "1.0.0",
+  "private": true,
   "scripts": {
-    "start": "node server.js"
+    "start": "node api/index.js"
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "pg": "^8.16.3"
+    "@vercel/node": "latest"
   }
 }
