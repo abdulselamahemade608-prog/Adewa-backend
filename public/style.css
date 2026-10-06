@@ -1,0 +1,76 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f4f7fb;
+}
+
+.app {
+  width: min(420px, 92%);
+  margin: 30px auto;
+}
+
+h1 {
+  text-align: center;
+}
+
+.balance-card {
+  background: white;
+  padding: 25px;
+  border-radius: 18px;
+  text-align: center;
+  margin: 20px 0;
+}
+
+.balance-card span {
+  display: block;
+}
+
+.balance-card strong {
+  display: block;
+  font-size: 32px;
+  margin-top: 8px;
+}
+
+button {
+  width: 100%;
+  padding: 15px;
+  border: 0;
+  border-radius: 12px;
+  font-size: 16px;
+  cursor: pointer;
+  background: #1687ff;
+  color: white;
+}
+
+button:disabled {
+  opacity: 0.6;
+}
+
+.withdraw {
+  background: white;
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 18px;
+}
+
+input {
+  width: 100%;
+  padding: 14px;
+  margin: 8px 0;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+#withdrawBtn {
+  margin-top: 8px;
+}
+
+#status {
+  text-align: center;
+  margin-top: 15px;
+}
