@@ -20,6 +20,14 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const WEBHOOK_SECRET =
   process.env.WEBHOOK_SECRET || 'adewa_webhook_secret';
 
+// Telegram user ID(s) of the admin(s) allowed to use /ban and /unban.
+// Set ADMIN_ID in Vercel env vars (several IDs separated by commas).
+const ADMIN_IDS =
+  String(process.env.ADMIN_ID || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
 const MINI_APP_URL =
   'https://abdulselamahemade608-prog.github.io/Adewa/';
 
@@ -952,6 +960,108 @@ app.post(
           : '';
 
       if (!chatId) {
+        return res.sendStatus(200);
+      }
+
+      // ===================================================
+      // /BAN <id>  and  /UNBAN <id>  (admin only)
+      // ===================================================
+
+      const adminCommand =
+        text.match(/^\/(ban|unban)(?:@\w+)?(?:\s+(\S+))?\s*$/i);
+
+      if (adminCommand) {
+
+        const fromId =
+          String(message.from?.id || '');
+
+        // Not an admin -> ignore silently
+        if (!ADMIN_IDS.includes(fromId)) {
+          return res.sendStatus(200);
+        }
+
+        await initDatabase();
+
+        const action =
+          adminCommand[1].toLowerCase();
+
+        const targetRaw =
+          adminCommand[2] || '';
+
+        if (!/^\d+$/.test(targetRaw)) {
+
+          await sendTelegramMessage(
+            chatId,
+            'Usage:\n/ban 123456789\n/unban 123456789'
+          );
+
+          return res.sendStatus(200);
+        }
+
+        const targetId =
+          Number(targetRaw);
+
+        if (action === 'ban') {
+
+          await pool.query(
+            `
+            INSERT INTO fraud_users (
+              telegram_id,
+              status,
+              ban_reason,
+              last_seen
+            )
+            VALUES ($1, 'banned', 'Admin ban', NOW())
+
+            ON CONFLICT (telegram_id)
+            DO UPDATE SET
+              status = 'banned',
+              ban_reason = 'Admin ban',
+              last_seen = NOW()
+            `,
+            [targetId]
+          );
+
+          await sendTelegramMessage(
+            chatId,
+            `🚫 User ${targetId} has been banned.`
+          );
+
+          return res.sendStatus(200);
+        }
+
+        const unbanned =
+          await pool.query(
+            `
+            UPDATE fraud_users
+            SET
+              status = 'verified',
+              ban_reason = '',
+              vpn_detected = FALSE,
+              proxy_detected = FALSE,
+              risk_score = 0,
+              ban_message_sent = FALSE,
+              last_seen = NOW()
+            WHERE telegram_id = $1
+            `,
+            [targetId]
+          );
+
+        if (unbanned.rowCount === 0) {
+
+          await sendTelegramMessage(
+            chatId,
+            `User ${targetId} was not found.`
+          );
+
+        } else {
+
+          await sendTelegramMessage(
+            chatId,
+            `✅ User ${targetId} has been unbanned.`
+          );
+        }
+
         return res.sendStatus(200);
       }
 
