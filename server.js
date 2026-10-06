@@ -21,10 +21,10 @@ const WEBHOOK_SECRET =
   process.env.WEBHOOK_SECRET || 'adewa_webhook_secret';
 
 const MINI_APP_URL =
-  'https://abdulselamahemade608-prog.github.io/V-/';
+  'https://abdulselamahemade608-prog.github.io/Adewa/';
 
 const WEBHOOK_URL =
-  'https://adewav2.vercel.app/telegram/webhook';
+  'https://backend-rho-tan-62.vercel.app/telegram/webhook';
 
 const TELEGRAM_API =
   `https://api.telegram.org/bot${BOT_TOKEN}`;
