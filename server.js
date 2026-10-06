@@ -119,6 +119,12 @@ function initDatabase() {
       BOOLEAN NOT NULL DEFAULT FALSE
     `);
 
+    await pool.query(`
+      ALTER TABLE fraud_users
+      ADD COLUMN IF NOT EXISTS whitelisted
+      BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+
     // -------------------------------------------------------
     // EARNING SYSTEM TABLES (balance + watch ads)
     // -------------------------------------------------------
@@ -1017,6 +1023,7 @@ app.post(
             DO UPDATE SET
               status = 'banned',
               ban_reason = 'Admin ban',
+              whitelisted = FALSE,
               last_seen = NOW()
             `,
             [targetId]
@@ -1041,6 +1048,7 @@ app.post(
               proxy_detected = FALSE,
               risk_score = 0,
               ban_message_sent = FALSE,
+              whitelisted = TRUE,
               last_seen = NOW()
             WHERE telegram_id = $1
             `,
@@ -1314,19 +1322,32 @@ app.post(
       // VPN / PROXY CHECK
       // ===================================================
 
+      const isWhitelisted =
+        existing.rows.length > 0 &&
+        existing.rows[0].whitelisted === true;
+
       const networkCheck =
-        await detectVPNProxy(ip);
+        isWhitelisted
+          ? {
+              vpn: false,
+              proxy: false,
+              tor: false,
+              detected: false
+            }
+          : await detectVPNProxy(ip);
 
       // ===================================================
       // MULTI ACCOUNT CHECK
       // ===================================================
 
       const multiAccount =
-        await detectMultiAccount(
-          telegramId,
-          ipHash,
-          deviceHash
-        );
+        isWhitelisted
+          ? { detected: false, reason: '' }
+          : await detectMultiAccount(
+              telegramId,
+              ipHash,
+              deviceHash
+            );
 
       // ===================================================
       // VPN / PROXY BAN
@@ -1770,6 +1791,7 @@ app.post(
         SET
           status = 'banned',
           ban_reason = 'Admin ban',
+          whitelisted = FALSE,
           last_seen = NOW()
         WHERE telegram_id = $1
         `,
@@ -1828,6 +1850,7 @@ app.post(
           proxy_detected = FALSE,
           risk_score = 0,
           ban_message_sent = FALSE,
+          whitelisted = TRUE,
           last_seen = NOW()
         WHERE telegram_id = $1
         `,
