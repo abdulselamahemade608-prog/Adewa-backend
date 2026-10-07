@@ -1,15 +1,16 @@
 {
   "name": "adewa-backend",
   "version": "1.0.0",
-  "main": "server.js",
   "private": true,
+  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=18"
   },
   "dependencies": {
+    "@ton/core": "^0.59.0",
     "@ton/crypto": "^3.3.0",
     "@ton/ton": "^15.1.0",
     "cors": "^2.8.5",
