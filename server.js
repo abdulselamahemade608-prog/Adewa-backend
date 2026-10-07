@@ -126,7 +126,11 @@ const q = (t, p) => pool.query(t, p);
 const ah = (fn) => (req, res, next) =>
   Promise.resolve(fn(req, res, next)).catch((e) => {
     console.error(e);
-    res.status(500).json({ error: 'server' });
+    res.status(500).json(
+      process.env.DEBUG_ERRORS === '1'
+        ? { error: 'server', detail: String(e && e.message) }
+        : { error: 'server' }
+    );
   });
 
 const todayStr = () =>
