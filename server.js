@@ -97,9 +97,7 @@ const ENABLED_METHODS = String(
   .filter((x) => ['telebirr', 'cbe'].includes(x)); /* withdraw = Telebirr + CBE only */
 
 const DEFAULT_GATE_CHANNELS = [
-  '@andbndj',
-  '@proof_chnallel',
-  '@ABDU_CRYPTO',
+   '@abdu_monye',
   '@m_r_work1'
 ];
 
