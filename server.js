@@ -97,7 +97,9 @@ const ENABLED_METHODS = String(
   .filter((x) => ['telebirr', 'cbe'].includes(x)); /* withdraw = Telebirr + CBE only */
 
 const DEFAULT_GATE_CHANNELS = [
-   '@abdu_monye',
+  '@andbndj',
+  '@proof_chnallel',
+  '@ABDU_CRYPTO',
   '@m_r_work1'
 ];
 
@@ -2917,7 +2919,7 @@ app.get(
              now() - interval '7 days'
          GROUP BY u.id
          ORDER BY ads DESC
-         LIMIT 55`
+         LIMIT 10`
       )
     ).rows;
 
@@ -2934,7 +2936,7 @@ app.get(
              now() - interval '7 days'
          GROUP BY u.id
          ORDER BY invites DESC
-         LIMIT 55`
+         LIMIT 10`
       )
     ).rows;
 
@@ -2971,7 +2973,7 @@ app.get(
          ) w
            ON w.user_id=u.id
          ORDER BY total_earned_etb DESC
-         LIMIT 55`,
+         LIMIT 10`,
         [coinPerEtb]
       )
     ).rows;
