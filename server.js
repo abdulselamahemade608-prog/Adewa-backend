@@ -36,7 +36,7 @@ const CRON_SECRET =
 
 const MINI_APP_URL =
   process.env.MINI_APP_URL ||
-  'https://abdulselamahemade608-prog.github.io/Mini';
+  'https://abdulselamahemade608-prog.github.io/Adewa';
 
 const BOT_USERNAME =
   process.env.BOT_USERNAME || '';
